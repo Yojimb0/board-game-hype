@@ -41,7 +41,7 @@
 
 	.sm {
 		padding: 2px 8px 2px 6px;
-		font-size: 0.68rem;
+		font-size: 0.74rem;
 		max-width: 70px;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -66,6 +66,8 @@
 		font-variant-numeric: tabular-nums;
 		opacity: 0.38;
 		font-weight: 500;
+		line-height: 1;
+		vertical-align: middle;
 	}
 
 	.pn.rec {
@@ -76,5 +78,8 @@
 		font-weight: 800;
 		opacity: 1;
 		color: var(--primary);
+		font-size: 1.15em;
+		line-height: 1;
+		vertical-align: middle;
 	}
 </style>

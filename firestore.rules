@@ -1,9 +1,46 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Each user can only read/write their own data
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    // Username reservations: anyone can read (for availability checks + lookups),
+    // only the owning user can write/delete their own reservation
+    match /usernames/{username} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasAll(['userId', 'username']);
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      // No update — delete + recreate to change
+      allow update: if false;
+    }
+
+    // User's own data
+    match /users/{userId} {
+      // Profile/settings: owner can read/write, anyone can read if public
+      match /settings/profile {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if request.auth != null && request.auth.uid == userId
+          && request.resource.data.keys().hasAll(['username', 'isPublic'])
+          && request.resource.data.username is string
+          && request.resource.data.isPublic is bool;
+      }
+
+      // Public profile read — anyone can read profile to check isPublic flag
+      match /settings/profile {
+        allow read: if true;
+      }
+
+      // Games: owner has full access
+      match /games/{gameId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Games: anyone can read if owner's profile is public
+      // (checked via get() on the profile doc)
+      match /games/{gameId} {
+        allow read: if get(/databases/$(database)/documents/users/$(userId)/settings/profile).data.isPublic == true;
+      }
     }
 
     // Deny all other access by default

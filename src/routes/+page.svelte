@@ -1,770 +1,358 @@
 <script lang="ts">
-	import { getAuthState } from '$lib/auth.svelte';
-	import { getCollection, nudgeHype } from '$lib/collection.svelte';
-	import { getSettings } from '$lib/settings.svelte';
-	import { calculateHypeScore } from '$lib/hype';
-	import GameListItem from '$lib/components/GameListItem.svelte';
-	import GameCard from '$lib/components/GameCard.svelte';
-	import GameDetailDialog from '$lib/components/GameDetailDialog.svelte';
-	import type { GameEntry, SortKey, ViewMode, BggGameDetails } from '$lib/types';
+	import { goto } from '$app/navigation';
+	import { getAuthState, loginWithGoogle } from '$lib/auth.svelte';
+	import { onMount } from 'svelte';
 
 	const authState = getAuthState();
-	const collection = getCollection();
-	const settings = getSettings();
+	const defaultBg = '#f5f5f5';
+	let bgColor = $state(defaultBg);
 
-	function handleHype(bggId: number) {
-		if (!authState.user) return;
-		nudgeHype(authState.user.uid, bggId, 1);
+	async function handleSignIn() {
+		await loginWithGoogle();
+		goto('/collection');
 	}
 
-	let sortKey = $state<SortKey>('hypeScore');
-	let sortAsc = $state(false);
-	let viewMode = $state<ViewMode>(settings.defaultView);
-	let selectedGame = $state<BggGameDetails | null>(null);
-	let filterOpen = $state(false);
-	let filterText = $state('');
-	let filterInputEl: HTMLInputElement | undefined = $state();
-	let filterBestAt = $state<number | null>(null);
-	let filterType = $state<string | null>(null);
-	let filterWeight = $state<number | null>(null);
-	let filtersOpen = $state(false);
+	onMount(() => {
+		const feats = [...document.querySelectorAll<HTMLElement>('.feat')];
+		const heroEl = document.querySelector('.hero');
 
-	function toggleFilter() {
-		filterOpen = !filterOpen;
-		if (!filterOpen) {
-			filterText = '';
-		} else {
-			setTimeout(() => filterInputEl?.focus(), 0);
-		}
-	}
+		function updateBg() {
+			const midY = window.innerHeight / 2;
 
-	function toggleFilters() {
-		filtersOpen = !filtersOpen;
-		if (!filtersOpen) {
-			filterBestAt = null;
-			filterType = null;
-			filterWeight = null;
-		}
-	}
+			if (heroEl) {
+				const heroRect = heroEl.getBoundingClientRect();
+				if (heroRect.top <= midY && heroRect.bottom >= midY) {
+					bgColor = defaultBg;
+					return;
+				}
+			}
 
-	function pickBestAt(n: number) {
-		filterBestAt = filterBestAt === n ? null : n;
-	}
-
-	function pickType(t: string) {
-		filterType = filterType === t ? null : t;
-	}
-
-	const hasActiveFilters = $derived(filterBestAt !== null || filterType !== null || filterWeight !== null);
-
-	// All unique best-at player counts across the collection, sorted
-	const bestAtNumbers = $derived.by(() => {
-		const set = new Set<number>();
-		for (const g of collection.games) {
-			if (g.bestPlayerCount) {
-				for (const n of g.bestPlayerCount) set.add(n);
+			for (const feat of feats) {
+				const rect = feat.getBoundingClientRect();
+				if (rect.top <= midY && rect.bottom >= midY) {
+					bgColor = feat.dataset.bg || defaultBg;
+					return;
+				}
 			}
 		}
-		return [...set].sort((a, b) => a - b);
-	});
 
-	// All unique types (BGG types + custom labels) across the collection, sorted
-	const bggTypes = $derived.by(() => {
-		const set = new Set<string>();
-		for (const g of collection.games) {
-			if (g.bggType) {
-				for (const t of g.bggType) set.add(t);
-			}
-		}
-		return [...set].sort();
-	});
+		window.addEventListener('scroll', updateBg, { passive: true });
+		updateBg();
 
-	const customLabels = $derived.by(() => {
-		const set = new Set<string>();
-		for (const g of collection.games) {
-			if (g.labels) {
-				for (const l of g.labels) set.add(l);
-			}
-		}
-		return [...set].sort();
-	});
-
-	const hasLabels = $derived(bggTypes.length > 0 || customLabels.length > 0);
-
-	const sortedGames = $derived.by(() => {
-		let all = settings.showHidden
-			? collection.games
-			: collection.games.filter((g) => !g.hidden);
-
-		if (filterText.trim()) {
-			const q = filterText.trim().toLowerCase();
-			all = all.filter((g) => g.name.toLowerCase().includes(q));
-		}
-
-		if (filterBestAt !== null) {
-			all = all.filter((g) => g.bestPlayerCount?.includes(filterBestAt!));
-		}
-
-		if (filterType) {
-			all = all.filter((g) => g.bggType?.includes(filterType!) || g.labels?.includes(filterType!));
-		}
-
-		if (filterWeight !== null) {
-			all = all.filter((g) => g.weight >= filterWeight! - 0.3 && g.weight <= filterWeight! + 0.3);
-		}
-
-		const list = [...all];
-		list.sort((a, b) => {
-			let cmp = 0;
-			switch (sortKey) {
-				case 'name':
-					cmp = a.name.localeCompare(b.name);
-					break;
-				case 'bggScore':
-					cmp = a.bggScore - b.bggScore;
-					break;
-		case 'weight':
-			cmp = a.weight - b.weight;
-			break;
-				case 'hypeScore':
-					cmp = calculateHypeScore(a.hypeEvents) - calculateHypeScore(b.hypeEvents);
-					break;
-				case 'addedAt':
-					cmp = a.addedAt - b.addedAt;
-					break;
-			}
-			return sortAsc ? cmp : -cmp;
-		});
-		return list;
-	});
-
-	function toggleSort(key: SortKey) {
-		if (sortKey === key) {
-			sortAsc = !sortAsc;
-		} else {
-			sortKey = key;
-			sortAsc = false;
-		}
-	}
-
-	async function openDetails(game: GameEntry) {
-		// Use stored data to build BggGameDetails
-		selectedGame = {
-			id: game.bggId,
-			name: game.name,
-			thumbnail: game.thumbnail,
-			image: game.image,
-			description: game.description || '',
-			yearPublished: game.yearPublished,
-			minPlayers: game.minPlayers,
-			maxPlayers: game.maxPlayers,
-			playingTime: game.playingTime,
-			minPlayTime: game.playingTime,
-			maxPlayTime: game.playingTime,
-			bggScore: game.bggScore,
-			averageRating: game.bggScore,
-			weight: game.weight,
-			bestPlayerCount: game.bestPlayerCount,
-			recommendedPlayerCount: game.recommendedPlayerCount || [],
-			bggType: game.bggType || [],
-			categories: game.categories || [],
-			mechanics: game.mechanics || []
+		return () => {
+			window.removeEventListener('scroll', updateBg);
+			document.body.style.backgroundColor = '';
 		};
-	}
+	});
 
-	const sortOptions: { key: SortKey; label: string }[] = [
-		{ key: 'hypeScore', label: '🔥 Hype' },
-		{ key: 'bggScore', label: 'BGG Score' },
-		{ key: 'weight', label: 'Weight' },
-		{ key: 'name', label: 'Name' },
-		{ key: 'addedAt', label: 'Added' }
-	];
+	$effect(() => {
+		document.body.style.backgroundColor = bgColor;
+	});
 </script>
 
-{#if !authState.user && !authState.loading}
-	<div class="empty-state">
-		<div class="empty-icon">🎲</div>
-		<h2>Board Game Hype</h2>
-		<p>Track your board game collection, rate your enthusiasm, and find your next play.</p>
-		<p class="hint">Sign in to get started</p>
-	</div>
-{:else if authState.loading || collection.loading}
-	<div class="loading">
-		<div class="spinner"></div>
-	</div>
-{:else}
-	<div class="controls">
-		<div class="sort-bar">
-			{#each sortOptions as opt}
-				<button
-					class="sort-chip"
-					class:active={sortKey === opt.key}
-					onclick={() => toggleSort(opt.key)}
-				>
-					{opt.label}
-					{#if sortKey === opt.key}
-						<span class="sort-dir">{sortAsc ? '↑' : '↓'}</span>
-					{/if}
+<div class="home">
+	<!-- Hero -->
+	<section class="hero">
+		<div class="hero-bg">
+			<img src="/home.jpg" alt="" class="hero-img" />
+		</div>
+		<div class="hero-overlay"></div>
+		<div class="hero-content">
+			<h1 class="hero-title">Board Game Hype</h1>
+			<p class="hero-sub">Track your collection.<br />Rank by excitement.<br />Find your next play.</p>
+			{#if authState.user}
+				<a href="/collection" class="cta">Go to my collection</a>
+			{:else}
+				<button class="cta" onclick={handleSignIn}>
+					<svg viewBox="0 0 24 24" width="18" height="18">
+						<path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+						<path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+						<path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+						<path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+					</svg>
+					Sign in with Google
 				</button>
-			{/each}
-		</div>
-		<div class="view-toggle">
-			<button
-				class="view-btn"
-				class:active={filterOpen}
-				onclick={toggleFilter}
-				title="Search"
-			>
-				<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-					<path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-				</svg>
-			</button>
-			<button
-				class="view-btn"
-				class:active={filtersOpen}
-				class:has-filters={hasActiveFilters}
-				onclick={toggleFilters}
-				title="Filters"
-			>
-				<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-					<path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z" />
-				</svg>
-			</button>
-			<button
-				class="view-btn"
-				class:active={viewMode === 'list'}
-				onclick={() => (viewMode = 'list')}
-				title="List view"
-			>
-				<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-					<path d="M3 14h4v-4H3v4zm0 5h4v-4H3v4zM3 9h4V5H3v4zm5 5h13v-4H8v4zm0 5h13v-4H8v4zM8 5v4h13V5H8z" />
-				</svg>
-			</button>
-			<button
-				class="view-btn"
-				class:active={viewMode === 'tiles'}
-				onclick={() => (viewMode = 'tiles')}
-				title="Tile view"
-			>
-				<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-					<path d="M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h5v-6h-5v6zm6 0h5v-6h-5v6zm-6-7h5V5h-5v6zm6-6v6h5V5h-5z" />
-				</svg>
-			</button>
-		</div>
-	</div>
-
-	{#if filterOpen}
-		<div class="filter-bar">
-			<div class="filter-row">
-				<input
-					bind:this={filterInputEl}
-					bind:value={filterText}
-					type="text"
-					placeholder="Filter by name..."
-					class="filter-input"
-				/>
-				{#if filterText}
-					<button class="filter-clear" onclick={() => (filterText = '')}>✕</button>
-				{/if}
-			</div>
-		</div>
-	{/if}
-
-	{#if filtersOpen}
-		<div class="filter-bar filters-panel">
-			<div class="sub-bar-row">
-				<span class="sub-bar-label">👤 Best at:</span>
-				<div class="sub-bar-pills">
-					{#each bestAtNumbers as n (n)}
-						<button
-							class="best-at-pill"
-							class:active={filterBestAt === n}
-							onclick={() => pickBestAt(n)}
-						>
-							{n}
-						</button>
-					{/each}
-				</div>
-			</div>
-			{#if hasLabels}
-				<div class="sub-bar-row">
-					<span class="sub-bar-label">🏷️ Label:</span>
-					<div class="sub-bar-pills">
-						{#each bggTypes as t (t)}
-							<button
-								class="type-pill bgg"
-								class:active={filterType === t}
-								onclick={() => pickType(t)}
-							>
-								{t.replace(' Games', '')}
-							</button>
-						{/each}
-						{#each customLabels as l (l)}
-							<button
-								class="type-pill custom"
-								class:active={filterType === l}
-								onclick={() => pickType(l)}
-							>
-								{l}
-							</button>
-						{/each}
-					</div>
-				</div>
 			{/if}
-			<div class="sub-bar-row weight-row">
-				<span class="sub-bar-label">🧠 Weight:</span>
-				<input
-					type="range"
-					class="weight-slider"
-					min="1"
-					max="5"
-					step="0.1"
-					value={filterWeight ?? 2.5}
-					oninput={(e) => { filterWeight = parseFloat((e.target as HTMLInputElement).value); }}
-				/>
-				<span class="weight-value">{filterWeight !== null ? filterWeight.toFixed(1) : '—'}</span>
-				{#if filterWeight !== null}
-					<button class="filter-clear" onclick={() => (filterWeight = null)}>✕</button>
-				{/if}
-			</div>
 		</div>
-	{/if}
+	</section>
 
-	{#if sortedGames.length === 0 && collection.games.length > 0}
-		<div class="empty-state small">
-			<p>No games match your filters.</p>
+	<!-- Feature sections -->
+	<section class="feat" data-bg="#FFF3E0">
+		<div class="feat-inner">
+			<span class="feat-emoji">🔥</span>
+			<h2>Hype-driven ranking</h2>
+			<p>Tap to hype a game. Scores <strong>decay over time</strong> so your list always reflects what excites you <em>right now</em>. Forgotten games drift down naturally.</p>
 		</div>
-	{:else if sortedGames.length === 0}
-		<div class="empty-state onboarding">
-			<div class="empty-icon">🎲</div>
-			<h2>Board Game Hype</h2>
+	</section>
 
-			<div class="onboarding-section">
-				<h3>What is this?</h3>
-				<p>Track your board game collection and rank games by <strong>hype</strong> — a score that decays over time so your list always reflects what you're excited about <em>right now</em>.</p>
-			</div>
-
-			<div class="onboarding-section">
-				<h3>Getting started</h3>
-				<ol>
-					<li><strong>Sign in</strong> with Google (top right)</li>
-					<li>Go to <strong>Add Game</strong> tab</li>
-					<li>Paste a <strong>BoardGameGeek link</strong> or upload a <strong>BGG CSV export</strong></li>
-					<li>Your collection appears here!</li>
-				</ol>
-			</div>
-
-			<div class="onboarding-section">
-				<h3>Hype score</h3>
-				<p>Tap the 🔥 button to hype a game. Repeated hypes stack. The score <strong>decays over ~5 weeks</strong>, so forgotten games drift down naturally.</p>
-			</div>
-
-			<a href="/search" class="cta-link">Add your first game →</a>
+	<section class="feat" data-bg="#E3F2FD">
+		<div class="feat-inner">
+			<span class="feat-emoji">📦</span>
+			<h2>Import from BGG</h2>
+			<p>Paste a <strong>BoardGameGeek link</strong> to add a single game, or bulk-import your entire collection via <strong>CSV export</strong>. Scores, weight, and player counts come along.</p>
 		</div>
-	{:else if viewMode === 'list'}
-		<div class="game-list">
-			{#each sortedGames as game (game.bggId)}
-				<GameListItem
-					{game}
-					onclick={() => openDetails(game)}
-					onhype={() => handleHype(game.bggId)}
-				/>
-			{/each}
-		</div>
-	{:else}
-		<div class="game-grid">
-			{#each sortedGames as game (game.bggId)}
-				<GameCard
-					{game}
-					onclick={() => openDetails(game)}
-					onhype={() => handleHype(game.bggId)}
-				/>
-			{/each}
-		</div>
-	{/if}
-{/if}
+	</section>
 
-<GameDetailDialog
-	bggDetails={selectedGame}
-	onclose={() => (selectedGame = null)}
-/>
+	<section class="feat" data-bg="#E0F2F1">
+		<div class="feat-inner">
+			<span class="feat-emoji">🏷️</span>
+			<h2>Labels &amp; filters</h2>
+			<p>Tag games with <strong>custom labels</strong>. Filter by player count, type, weight, or label — all in one tap. Find the perfect game for tonight.</p>
+		</div>
+	</section>
+
+	<section class="feat" data-bg="#EDE7F6">
+		<div class="feat-inner">
+			<span class="feat-emoji">🔗</span>
+			<h2>Share your shelf</h2>
+			<p>Pick a username, go public, and <strong>share your collection link</strong> with friends. They can browse, filter, and get inspired.</p>
+		</div>
+	</section>
+
+	<!-- Footer CTA -->
+	<section class="footer-cta">
+		<p class="footer-note">Free. No ads. Just games.</p>
+		{#if authState.user}
+			<a href="/collection" class="cta dark">My collection →</a>
+		{:else}
+			<button class="cta dark" onclick={handleSignIn}>Get started</button>
+		{/if}
+	</section>
+</div>
 
 <style>
-	.controls {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 16px;
-		background: var(--surface);
-		border-bottom: 1px solid var(--divider);
-		position: sticky;
-		top: 52px;
-		z-index: 50;
+	.home {
 	}
 
-	.sort-bar {
-		flex: 1;
-		display: flex;
-		gap: 6px;
-		overflow-x: auto;
-		scrollbar-width: none;
-		-ms-overflow-style: none;
-	}
-
-	.sort-bar::-webkit-scrollbar {
-		display: none;
-	}
-
-	.sort-chip {
-		white-space: nowrap;
-		font-size: 0.75rem;
-		padding: 4px 10px;
-		border-radius: 14px;
-		background: var(--background);
-		color: var(--text-secondary);
-		font-weight: 500;
-		transition: all 0.15s;
-		flex-shrink: 0;
-	}
-
-	.sort-chip.active {
-		background: var(--primary);
-		color: white;
-	}
-
-	.sort-dir {
-		margin-left: 2px;
-		font-size: 0.7rem;
-	}
-
-	.view-toggle {
-		display: flex;
-		gap: 2px;
-		flex-shrink: 0;
-	}
-
-	.view-btn {
-		padding: 4px;
-		border-radius: var(--radius-xs);
-		color: var(--text-hint);
-		transition: color 0.15s;
-	}
-
-	.view-btn.active {
-		color: var(--primary);
-	}
-
-	.view-btn.has-filters {
+	/* ===================== Hero ===================== */
+	.hero {
 		position: relative;
+		height: 100vh;
+		height: 100dvh;
+		min-height: 480px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		overflow: hidden;
+		width: 100vw;
+		margin-left: calc(50% - 50vw);
 	}
 
-	.view-btn.has-filters::after {
-		content: '';
+	.hero-bg {
 		position: absolute;
-		top: 2px;
-		right: 2px;
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--accent, #FF5722);
+		inset: -20% 0 0 0;
+		z-index: 0;
 	}
 
-	.filter-bar {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-		padding: 6px 16px;
-		background: var(--surface);
-		border-bottom: 1px solid var(--divider);
-		position: sticky;
-		top: 93px;
-		z-index: 49;
+	.hero-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		will-change: transform;
+		animation: hero-parallax linear both;
+		animation-timeline: scroll();
+		animation-range: 0vh 100vh;
 	}
 
-	.filter-row {
-		display: flex;
+	@keyframes hero-parallax {
+		from { transform: translateY(0) scale(1.05); }
+		to   { transform: translateY(18%) scale(1); }
+	}
+
+	.hero-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+		background: linear-gradient(
+			to top,
+			rgba(0, 0, 0, 0.7) 0%,
+			rgba(0, 0, 0, 0.35) 50%,
+			rgba(0, 0, 0, 0.15) 100%
+		);
+	}
+
+	.hero-content {
+		position: relative;
+		z-index: 2;
+		text-align: center;
+		padding: 0 32px;
+		color: white;
+		animation:
+			hero-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both,
+			hero-out linear both;
+		animation-timeline: auto, scroll();
+		animation-range: normal, 0vh 60vh;
+	}
+
+	@keyframes hero-in {
+		from { opacity: 0; transform: translateY(28px); }
+		to   { opacity: 1; transform: translateY(0); }
+	}
+
+	@keyframes hero-out {
+		from { opacity: 1; transform: translateY(0); filter: blur(0); }
+		to   { opacity: 0; transform: translateY(-24px); filter: blur(3px); }
+	}
+
+	.hero-title {
+		font-size: 2.8rem;
+		font-weight: 800;
+		letter-spacing: -0.03em;
+		line-height: 1.1;
+		text-shadow: 0 2px 20px rgba(0, 0, 0, 0.4);
+	}
+
+	.hero-sub {
+		margin-top: 16px;
+		font-size: 1.05rem;
+		font-weight: 400;
+		line-height: 1.6;
+		opacity: 0.85;
+		text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+	}
+
+	/* ===================== CTA Button ===================== */
+	.cta {
+		display: inline-flex;
 		align-items: center;
-		gap: 4px;
-	}
-
-	.filter-input {
-		flex: 1;
-		padding: 6px 10px;
-		font-size: 0.82rem;
-		border: 1px solid var(--divider);
-		border-radius: var(--radius-sm);
-		background: var(--background);
-		color: var(--text);
-		outline: none;
-		transition: border-color 0.15s;
-	}
-
-	.filter-input:focus {
-		border-color: var(--primary);
-	}
-
-	.filter-clear {
-		padding: 4px 8px;
-		font-size: 0.75rem;
-		color: var(--text-hint);
-		border-radius: var(--radius-sm);
-		transition: color 0.15s;
-	}
-
-	.filter-clear:hover {
-		color: var(--text);
-	}
-
-	.filters-panel {
-		flex-direction: column;
 		gap: 8px;
-	}
-
-	.sub-bar-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.sub-bar-label {
-		font-size: 0.72rem;
+		margin-top: 28px;
+		padding: 13px 30px;
+		border-radius: 28px;
+		background: var(--primary);
+		color: white;
+		font-size: 0.9rem;
 		font-weight: 600;
-		color: var(--text-secondary);
-		white-space: nowrap;
+		text-decoration: none;
+		box-shadow: 0 4px 20px rgba(92, 107, 192, 0.3);
+		transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+		letter-spacing: 0.01em;
 	}
 
-	.sub-bar-pills {
-		display: flex;
-		gap: 6px;
-		flex-wrap: wrap;
+	.cta:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 6px 28px rgba(92, 107, 192, 0.4);
+		background: var(--primary-dark);
 	}
 
-	.best-at-pill {
-		width: 30px;
-		height: 30px;
-		border-radius: 50%;
-		font-size: 0.78rem;
-		font-weight: 700;
+	.cta:active { transform: translateY(0); }
+	.cta svg { flex-shrink: 0; }
+
+	.cta.dark {
+		background: var(--text);
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+	}
+
+	.cta.dark:hover {
+		background: #424242;
+		box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+	}
+
+	/* ===================== Feature sections ===================== */
+	.feat {
+		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: var(--background);
-		color: var(--text-secondary);
-		border: 1px solid var(--divider);
-		transition: all 0.15s;
-		font-variant-numeric: tabular-nums;
+		min-height: 70vh;
+		padding: 80px 32px;
+		background: transparent;
 	}
 
-	.best-at-pill:hover {
-		border-color: var(--primary);
-	}
-
-	.best-at-pill.active {
-		background: var(--primary);
-		color: white;
-		border-color: var(--primary);
-	}
-
-	.type-pill {
-		padding: 4px 12px;
-		border-radius: 14px;
-		font-size: 0.72rem;
-		font-weight: 600;
-		background: var(--background);
-		color: var(--text-secondary);
-		border: 1px solid var(--divider);
-		transition: all 0.15s;
-		white-space: nowrap;
-	}
-
-	.type-pill.bgg {
-		background: #E8EAF6;
-		color: #3949AB;
-		border-color: #C5CAE9;
-	}
-
-	.type-pill.custom {
-		background: #E0F2F1;
-		color: #00695C;
-		border-color: #B2DFDB;
-	}
-
-	.type-pill:hover {
-		border-color: var(--primary);
-	}
-
-	.type-pill.custom:hover {
-		border-color: #00897B;
-	}
-
-	.type-pill.active {
-		background: #3949AB;
-		color: white;
-		border-color: #3949AB;
-	}
-
-	.type-pill.custom.active {
-		background: #00695C;
-		color: white;
-		border-color: #00695C;
-	}
-
-	.weight-row {
-		gap: 10px;
-	}
-
-	.weight-slider {
-		flex: 1;
-		height: 4px;
-		appearance: none;
-		-webkit-appearance: none;
-		background: var(--divider);
-		border-radius: 2px;
-		outline: none;
-		cursor: pointer;
-	}
-
-	.weight-slider::-webkit-slider-thumb {
-		-webkit-appearance: none;
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		background: var(--primary);
-		cursor: pointer;
-		border: 2px solid white;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-	}
-
-	.weight-slider::-moz-range-thumb {
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		background: var(--primary);
-		cursor: pointer;
-		border: 2px solid white;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-	}
-
-	.weight-value {
-		font-size: 0.78rem;
-		font-weight: 700;
-		font-variant-numeric: tabular-nums;
-		color: var(--text);
-		min-width: 24px;
+	.feat-inner {
+		max-width: 440px;
 		text-align: center;
+
+		/* Content reveal on scroll */
+		animation: feat-reveal linear both;
+		animation-timeline: view();
+		animation-range: entry 10% entry 55%;
 	}
 
-	.game-list {
-		background: var(--surface);
+	@keyframes feat-reveal {
+		from {
+			opacity: 0;
+			transform: translateY(40px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 
-	.game-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-		gap: 10px;
-		padding: 12px 16px;
+	.feat-emoji {
+		display: block;
+		font-size: 2.8rem;
+		margin-bottom: 20px;
+		line-height: 1;
 	}
 
-	.empty-state {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		padding: 60px 24px;
-		text-align: center;
-		gap: 8px;
-	}
-
-	.empty-state.small {
-		padding: 40px 24px;
-	}
-
-	.empty-icon {
-		font-size: 3rem;
-		margin-bottom: 8px;
-	}
-
-	.empty-state h2 {
+	.feat h2 {
 		font-size: 1.4rem;
 		font-weight: 700;
-	}
-
-	.empty-state p {
-		color: var(--text-secondary);
-		font-size: 0.9rem;
-		max-width: 300px;
-	}
-
-	.hint {
-		color: var(--text-hint);
-		font-size: 0.82rem !important;
-		margin-top: 4px;
-	}
-
-	.empty-state.onboarding {
-		padding: 40px 24px;
-		gap: 12px;
-	}
-
-	.onboarding-section {
-		text-align: left;
-		max-width: 340px;
-		width: 100%;
-	}
-
-	.onboarding-section h3 {
-		font-size: 0.82rem;
-		font-weight: 700;
-		color: var(--primary);
-		margin-bottom: 4px;
-	}
-
-	.onboarding-section p,
-	.onboarding-section li {
-		font-size: 0.8rem;
-		color: var(--text-secondary);
-		line-height: 1.55;
-	}
-
-	.onboarding-section ol {
-		padding-left: 18px;
-		margin: 0;
-	}
-
-	.onboarding-section li {
-		margin-bottom: 2px;
-	}
-
-	.onboarding-section strong {
 		color: var(--text);
+		letter-spacing: -0.01em;
+		margin-bottom: 12px;
 	}
 
-	.cta-link {
-		margin-top: 8px;
+	.feat p {
+		font-size: 0.88rem;
+		color: var(--text-secondary);
+		line-height: 1.7;
+	}
+
+	.feat p strong {
+		color: var(--text);
 		font-weight: 600;
-		color: var(--primary);
-		font-size: 0.9rem;
 	}
 
-	.loading {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 60px;
+	/* ===================== Footer CTA ===================== */
+	.footer-cta {
+		text-align: center;
+		padding: 80px 32px 100px;
+
+		animation: footer-in linear both;
+		animation-timeline: view();
+		animation-range: entry 0% entry 50%;
 	}
 
-	.spinner {
-		width: 32px;
-		height: 32px;
-		border: 3px solid var(--divider);
-		border-top-color: var(--primary);
-		border-radius: 50%;
-		animation: spin 0.7s linear infinite;
+	@keyframes footer-in {
+		from { opacity: 0; transform: translateY(20px); }
+		to   { opacity: 1; transform: translateY(0); }
 	}
 
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
+	.footer-note {
+		font-size: 0.85rem;
+		color: var(--text-hint);
+		margin-bottom: 4px;
+		letter-spacing: 0.02em;
+	}
+
+	/* ===================== Responsive ===================== */
+	@media (max-width: 480px) {
+		.hero-title {
+			font-size: 2rem;
+		}
+
+		.hero-sub {
+			font-size: 0.92rem;
+		}
+
+		.feat {
+			min-height: 60vh;
+			padding: 60px 24px;
+		}
+
+		.feat-emoji {
+			font-size: 2.2rem;
+		}
+
+		.feat h2 {
+			font-size: 1.2rem;
+		}
+
+		.footer-cta {
+			padding: 60px 24px 80px;
 		}
 	}
 </style>

@@ -1,0 +1,23 @@
+{
+	"name": "Board Game Hype",
+	"short_name": "BG Hype",
+	"description": "Track your board game collection and rank games by hype",
+	"start_url": "/collection",
+	"display": "standalone",
+	"background_color": "#f5f5f5",
+	"theme_color": "#5C6BC0",
+	"icons": [
+		{
+			"src": "/fire_1f525.png",
+			"sizes": "256x256",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/favicon.png",
+			"sizes": "256x256",
+			"type": "image/png",
+			"purpose": "maskable"
+		}
+	]
+}

@@ -2,6 +2,13 @@
 	import { getAuthState } from '$lib/auth.svelte';
 	import { getCollection, clearCollection } from '$lib/collection.svelte';
 	import { getSettings } from '$lib/settings.svelte';
+	import {
+		getProfile,
+		isUsernameAvailable,
+		isValidUsername,
+		saveProfile,
+		setPublic
+	} from '$lib/profile.svelte';
 	import type { ViewMode } from '$lib/types';
 
 	interface Props {
@@ -13,12 +20,28 @@
 	const authState = getAuthState();
 	const collection = getCollection();
 	const settings = getSettings();
+	const profile = getProfile();
 
 	let dialogEl: HTMLDialogElement | undefined = $state();
 	let clearing = $state(false);
 
+	// Username editing
+	let usernameInput = $state('');
+	let usernameError = $state<string | null>(null);
+	let usernameChecking = $state(false);
+	let usernameSaving = $state(false);
+	let usernameSuccess = $state(false);
+	let checkTimeout: ReturnType<typeof setTimeout> | undefined;
+
 	$effect(() => {
 		if (dialogEl) dialogEl.showModal();
+	});
+
+	// Initialize username input from profile
+	$effect(() => {
+		if (profile.data?.username) {
+			usernameInput = profile.data.username;
+		}
 	});
 
 	function handleClose() {
@@ -51,7 +74,89 @@
 		settings.defaultView = mode;
 	}
 
+	function handleUsernameInput(e: Event) {
+		const value = (e.target as HTMLInputElement).value.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+		usernameInput = value;
+		usernameSuccess = false;
+		usernameError = null;
 
+		if (checkTimeout) clearTimeout(checkTimeout);
+
+		const validationError = isValidUsername(value);
+		if (validationError) {
+			usernameError = validationError;
+			return;
+		}
+
+		// Don't check if it's the same as current
+		if (value === profile.data?.username) {
+			usernameError = null;
+			return;
+		}
+
+		usernameChecking = true;
+		checkTimeout = setTimeout(async () => {
+			try {
+				const available = await isUsernameAvailable(value, authState.user?.uid);
+				if (usernameInput === value) {
+					usernameChecking = false;
+					usernameError = available ? null : 'Already taken';
+				}
+			} catch {
+				usernameChecking = false;
+				usernameError = 'Could not check availability';
+			}
+		}, 400);
+	}
+
+	async function handleSaveUsername() {
+		if (!authState.user || usernameError || usernameChecking) return;
+		if (usernameInput === profile.data?.username) return;
+
+		usernameSaving = true;
+		try {
+			await saveProfile(authState.user.uid, usernameInput, profile.data?.isPublic ?? false);
+			usernameSuccess = true;
+			setTimeout(() => (usernameSuccess = false), 2000);
+		} catch (err) {
+			console.error('Failed to save username:', err);
+			usernameError = 'Failed to save';
+		} finally {
+			usernameSaving = false;
+		}
+	}
+
+	async function handleTogglePublic(e: Event) {
+		if (!authState.user) return;
+		const checked = (e.target as HTMLInputElement).checked;
+		await setPublic(authState.user.uid, checked);
+	}
+
+	function handleShare() {
+		if (!profile.data?.username) return;
+		const url = `${window.location.origin}/${profile.data.username}`;
+		if (navigator.share) {
+			navigator.share({
+				title: `${profile.data.username}'s Board Game Collection`,
+				url
+			});
+		} else {
+			navigator.clipboard.writeText(url);
+			alert('Link copied to clipboard!');
+		}
+	}
+
+	const hasUsername = $derived(!!profile.data?.username);
+	const isPublic = $derived(profile.data?.isPublic ?? false);
+	const shareUrl = $derived(
+		profile.data?.username ? `${typeof window !== 'undefined' ? window.location.origin : ''}/${profile.data.username}` : ''
+	);
+	const canSaveUsername = $derived(
+		usernameInput.length >= 3
+		&& !usernameError
+		&& !usernameChecking
+		&& usernameInput !== profile.data?.username
+	);
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -108,6 +213,75 @@
 					/>
 				</label>
 			</section>
+
+			<!-- Sharing -->
+			{#if authState.user}
+				<section class="setting-section">
+					<h3 class="setting-title">Share your collection</h3>
+					<p class="setting-desc">Pick a username and make your collection public so others can browse it.</p>
+
+					<div class="username-row">
+						<div class="username-input-wrap">
+							<span class="username-prefix">/</span>
+							<input
+								type="text"
+								class="username-input"
+								class:error={!!usernameError && !usernameChecking}
+								class:success={usernameSuccess}
+								value={usernameInput}
+								oninput={handleUsernameInput}
+								placeholder="username"
+								maxlength="24"
+							/>
+						</div>
+						<button
+							class="username-save"
+							onclick={handleSaveUsername}
+							disabled={!canSaveUsername || usernameSaving}
+						>
+							{#if usernameSaving}
+								…
+							{:else if usernameSuccess}
+								✓
+							{:else}
+								Save
+							{/if}
+						</button>
+					</div>
+					{#if usernameError && !usernameChecking}
+						<p class="username-hint error">{usernameError}</p>
+					{:else if usernameChecking}
+						<p class="username-hint">Checking…</p>
+					{/if}
+
+					{#if hasUsername}
+						<label class="toggle-row" style="margin-top: 14px;">
+							<div>
+								<h3 class="setting-title">Public collection</h3>
+								<p class="setting-desc-inline">Anyone with your link can browse your games.</p>
+							</div>
+							<input
+								type="checkbox"
+								class="toggle-input"
+								checked={isPublic}
+								onchange={handleTogglePublic}
+							/>
+						</label>
+
+						{#if isPublic}
+							<div class="share-row">
+								<span class="share-url">{shareUrl}</span>
+								<button class="share-btn" onclick={handleShare}>
+									<svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+										<path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z" />
+									</svg>
+									Share
+								</button>
+							</div>
+						{/if}
+					{/if}
+				</section>
+			{/if}
 
 			<!-- Danger zone -->
 			{#if authState.user}
@@ -304,6 +478,130 @@
 
 	.view-option.active svg {
 		opacity: 1;
+	}
+
+	/* Username / sharing */
+	.username-row {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+
+	.username-input-wrap {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		border: 1px solid var(--divider);
+		border-radius: var(--radius-sm);
+		background: var(--background);
+		overflow: hidden;
+	}
+
+	.username-prefix {
+		padding: 0 0 0 10px;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--text-hint);
+	}
+
+	.username-input {
+		flex: 1;
+		border: none !important;
+		background: transparent !important;
+		padding: 8px 10px 8px 2px;
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--text);
+		min-width: 0;
+	}
+
+	.username-input:focus {
+		outline: none;
+	}
+
+	.username-input-wrap:focus-within {
+		border-color: var(--primary);
+	}
+
+	.username-input-wrap:has(.error) {
+		border-color: var(--error);
+	}
+
+	.username-input-wrap:has(.success) {
+		border-color: var(--success);
+	}
+
+	.username-save {
+		padding: 8px 16px;
+		border-radius: var(--radius-sm);
+		background: var(--primary);
+		color: white;
+		font-size: 0.82rem;
+		font-weight: 600;
+		white-space: nowrap;
+		transition: background 0.15s;
+	}
+
+	.username-save:hover:not(:disabled) {
+		background: var(--primary-dark);
+	}
+
+	.username-save:disabled {
+		opacity: 0.35;
+	}
+
+	.username-hint {
+		font-size: 0.72rem;
+		margin-top: 4px;
+		color: var(--text-hint);
+	}
+
+	.username-hint.error {
+		color: var(--error);
+	}
+
+	.share-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 10px;
+		padding: 8px 10px;
+		background: var(--background);
+		border-radius: var(--radius-sm);
+	}
+
+	.share-url {
+		flex: 1;
+		font-size: 0.72rem;
+		color: var(--text-secondary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		min-width: 0;
+	}
+
+	.share-btn {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		padding: 6px 12px;
+		border-radius: 16px;
+		background: var(--primary);
+		color: white;
+		font-size: 0.75rem;
+		font-weight: 600;
+		white-space: nowrap;
+		transition: background 0.15s;
+		flex-shrink: 0;
+	}
+
+	.share-btn:hover {
+		background: var(--primary-dark);
+	}
+
+	.share-btn svg {
+		width: 16px;
+		height: 16px;
 	}
 
 	/* Danger zone */

@@ -34,7 +34,7 @@
 
 	.sm {
 		padding: 2px 8px 2px 6px;
-		font-size: 0.68rem;
+		font-size: 0.74rem;
 	}
 
 	.md {

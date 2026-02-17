@@ -1,8 +1,10 @@
 <script lang="ts">
 	import '../app.css';
 	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import { getAuthState, loginWithGoogle, logout } from '$lib/auth.svelte';
 	import { subscribeToCollection, unsubscribeFromCollection } from '$lib/collection.svelte';
+	import { subscribeToProfile, unsubscribeFromProfile } from '$lib/profile.svelte';
 	import SettingsDialog from '$lib/components/SettingsDialog.svelte';
 	import type { Snippet } from 'svelte';
 
@@ -15,6 +17,41 @@
 	let showSettings = $state(false);
 	let showHelp = $state(false);
 	let helpDialogEl: HTMLDialogElement | undefined = $state();
+
+	/* PWA install prompt */
+	interface BeforeInstallPromptEvent extends Event {
+		prompt(): Promise<void>;
+		userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+	}
+	let deferredPrompt: BeforeInstallPromptEvent | null = $state(null);
+	let installDismissed = $state(false);
+
+	onMount(() => {
+		const handler = (e: Event) => {
+			e.preventDefault();
+			deferredPrompt = e as BeforeInstallPromptEvent;
+		};
+		window.addEventListener('beforeinstallprompt', handler);
+
+		// Check if already installed (standalone mode)
+		if (window.matchMedia('(display-mode: standalone)').matches) {
+			installDismissed = true;
+		}
+
+		return () => window.removeEventListener('beforeinstallprompt', handler);
+	});
+
+	async function installApp() {
+		if (!deferredPrompt) return;
+		deferredPrompt.prompt();
+		const result = await deferredPrompt.userChoice;
+		if (result.outcome === 'accepted') {
+			deferredPrompt = null;
+			installDismissed = true;
+		}
+	}
+
+	const canInstall = $derived(!!deferredPrompt && !installDismissed);
 
 	$effect(() => {
 		if (showHelp && helpDialogEl) helpDialogEl.showModal();
@@ -30,40 +67,61 @@
 	$effect(() => {
 		const uid = authState.user?.uid ?? null;
 		if (uid !== prevUid) {
-			if (prevUid) unsubscribeFromCollection();
-			if (uid) subscribeToCollection(uid);
+			if (prevUid) {
+				unsubscribeFromCollection();
+				unsubscribeFromProfile();
+			}
+			if (uid) {
+				subscribeToCollection(uid);
+				subscribeToProfile(uid);
+			}
 			prevUid = uid;
 		}
 	});
 
 	const currentPath = $derived(page.url.pathname);
+	const isHome = $derived(currentPath === '/');
+	const showNav = $derived(!!authState.user && (currentPath === '/collection' || currentPath === '/search'));
 </script>
 
 <div class="app-shell">
-	<header class="top-bar">
-		<a href="/" class="app-title">
-			<span class="title-icon">🎲</span>
+	<header class="top-bar" class:transparent={isHome}>
+		<a href={authState.user ? '/collection' : '/'} class="app-title">
+			<span class="title-icon">🔥</span>
 			Board Game Hype
 		</a>
 		<div class="top-bar-actions">
-			<button
-				class="icon-btn"
-				onclick={() => (showHelp = true)}
-				title="Help"
-			>
-				<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-					<path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z" />
-				</svg>
-			</button>
-			<button
-				class="icon-btn"
-				onclick={() => (showSettings = true)}
-				title="Settings"
-			>
-				<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-					<path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" />
-				</svg>
-			</button>
+			{#if !isHome}
+				{#if canInstall}
+					<button
+						class="icon-btn install-btn"
+						onclick={installApp}
+						title="Install app"
+					>
+						<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+							<path d="M18 15v3H6v-3H4v3c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-3h-2zm-1-4-1.41-1.41L13 12.17V4h-2v8.17L8.41 9.59 7 11l5 5 5-5z" />
+						</svg>
+					</button>
+				{/if}
+				<button
+					class="icon-btn"
+					onclick={() => (showHelp = true)}
+					title="Help"
+				>
+					<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+						<path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z" />
+					</svg>
+				</button>
+				<button
+					class="icon-btn"
+					onclick={() => (showSettings = true)}
+					title="Settings"
+				>
+					<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+						<path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" />
+					</svg>
+				</button>
+			{/if}
 			{#if authState.loading}
 				<div class="avatar-placeholder"></div>
 			{:else if authState.user}
@@ -87,26 +145,28 @@
 		</div>
 	</header>
 
-	<main class="content">
+	<main class="content" class:no-nav={!showNav}>
 		{@render children()}
 	</main>
 
-	<nav class="bottom-nav">
-		<a href="/" class="nav-item" class:active={currentPath === '/'}>
-			<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-				<path
-					d="M4 13h6a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1zm0 8h6a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1zm10 0h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1zm0-18v4a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1z"
-				/>
-			</svg>
-			<span>Collection</span>
-		</a>
-		<a href="/search" class="nav-item" class:active={currentPath === '/search'}>
-			<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-				<path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-			</svg>
-			<span>Add Game</span>
-		</a>
-	</nav>
+	{#if showNav}
+		<nav class="bottom-nav">
+			<a href="/collection" class="nav-item" class:active={currentPath === '/collection'}>
+				<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+					<path
+						d="M4 13h6a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1zm0 8h6a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1zm10 0h6a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1zm0-18v4a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1z"
+					/>
+				</svg>
+				<span>Collection</span>
+			</a>
+			<a href="/search" class="nav-item" class:active={currentPath === '/search'}>
+				<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+					<path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+				</svg>
+				<span>Add Game</span>
+			</a>
+		</nav>
+	{/if}
 </div>
 
 {#if showSettings}
@@ -145,7 +205,7 @@
 				<section class="help-section">
 					<h3>Filters &amp; sorting</h3>
 					<ul>
-						<li>🔍 <strong>Search</strong> — filter by name + pinned labels</li>
+						<li>🔍 <strong>Search</strong> — filter by name</li>
 						<li>☰ <strong>Filters</strong> — best player count, game type, weight</li>
 						<li><strong>Sort chips</strong> — hype, BGG score, weight, name, date added</li>
 					</ul>
@@ -156,7 +216,7 @@
 					<ul>
 						<li>Tap a game to see details, add labels, log play dates, or write notes</li>
 						<li>Hide games you don't want to see (toggle in game details)</li>
-						<li>Pick 2 pinned labels in <strong>Settings</strong> for quick filtering</li>
+						<li>Add custom labels in game details — they appear as filters alongside BGG types</li>
 					</ul>
 				</section>
 			</div>
@@ -222,6 +282,16 @@
 		color: var(--text);
 	}
 
+	.install-btn {
+		color: var(--primary);
+		animation: pulse-install 2s ease-in-out 3;
+	}
+
+	@keyframes pulse-install {
+		0%, 100% { transform: scale(1); }
+		50% { transform: scale(1.15); }
+	}
+
 	.user-btn {
 		padding: 0;
 		border-radius: 50%;
@@ -274,6 +344,31 @@
 	.content {
 		flex: 1;
 		padding-bottom: 60px;
+	}
+
+	.content.no-nav {
+		padding-bottom: 0;
+	}
+
+	.top-bar.transparent {
+		background: transparent;
+		border-bottom: none;
+		position: absolute;
+		left: 0;
+		right: 0;
+		max-width: 960px;
+		margin: 0 auto;
+	}
+
+	.top-bar.transparent .app-title,
+	.top-bar.transparent .icon-btn,
+	.top-bar.transparent .sign-in-btn {
+		color: white;
+		text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+	}
+
+	.top-bar.transparent .sign-in-btn {
+		text-shadow: none;
 	}
 
 	.bottom-nav {

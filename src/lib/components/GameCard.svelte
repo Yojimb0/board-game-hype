@@ -9,15 +9,16 @@
 	import BggScoreBadge from './BggScoreBadge.svelte';
 	import PlayerCount from './PlayerCount.svelte';
 	import WeightBadge from './WeightBadge.svelte';
-	import HypeUpIcon from './HypeUpIcon.svelte';
+
 
 	interface Props {
 		game: GameEntry;
+		readonly?: boolean;
 		onclick?: () => void;
 		onhype?: () => void;
 	}
 
-	let { game, onclick, onhype }: Props = $props();
+	let { game, readonly: isReadonly = false, onclick, onhype }: Props = $props();
 
 	const hypeScore = $derived(calculateHypeScore(game.hypeEvents));
 	const hypeColor = $derived(getHypeColor(hypeScore));
@@ -54,13 +55,15 @@
 			</div>
 		</div>
 	</button>
-	<button
-		class="hype-up-btn"
-		onclick={(e) => { e.stopPropagation(); onhype?.(); }}
-		title="Hype up!"
-	>
-		<HypeUpIcon size={18} />
-	</button>
+	{#if !isReadonly}
+		<button
+			class="hype-up-btn"
+			onclick={(e) => { e.stopPropagation(); onhype?.(); }}
+			title="Hype up!"
+		>
+			🔥
+		</button>
+	{/if}
 </div>
 
 <style>
@@ -142,26 +145,26 @@
 		position: absolute;
 		bottom: 6px;
 		right: 6px;
-		width: 32px;
-		height: 32px;
+		width: 34px;
+		height: 34px;
 		border-radius: 50%;
-		background: var(--surface);
-		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+		background: rgba(255, 87, 34, 0.1);
+		backdrop-filter: blur(4px);
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: var(--text-hint);
-		transition: transform 0.1s, background 0.15s, color 0.15s;
+		font-size: 1rem;
+		transition: transform 0.1s, background 0.15s;
 		z-index: 1;
 	}
 
 	.hype-up-btn:hover {
-		color: #FF5722;
+		background: rgba(255, 87, 34, 0.2);
 	}
 
 	.hype-up-btn:active {
 		transform: scale(0.85);
-		background: rgba(255, 87, 34, 0.12);
-		color: #FF5722;
+		background: rgba(255, 87, 34, 0.3);
 	}
 </style>
