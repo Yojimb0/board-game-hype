@@ -81,7 +81,7 @@
 
 	const currentPath = $derived(page.url.pathname);
 	const isHome = $derived(currentPath === '/');
-	const showNav = $derived(!!authState.user && (currentPath === '/collection' || currentPath === '/search'));
+	const showNav = $derived(!!authState.user && (currentPath === '/collection' || currentPath === '/add'));
 </script>
 
 <div class="app-shell">
@@ -159,7 +159,7 @@
 				</svg>
 				<span>Collection</span>
 			</a>
-			<a href="/search" class="nav-item" class:active={currentPath === '/search'}>
+			<a href="/add" class="nav-item" class:active={currentPath === '/add'}>
 				<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
 					<path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
 				</svg>

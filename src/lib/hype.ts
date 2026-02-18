@@ -22,21 +22,21 @@ export function calculateHypeScore(hypeEvents: HypeEvent[]): number {
 		score += event.direction * Math.exp(-LAMBDA * daysSince);
 	}
 
-	return Math.round(Math.max(0, score) * 100) / 100;
+	return Math.round(Math.min(5, Math.max(0, score)) * 100) / 100;
 }
 
 export function getHypeColor(score: number): string {
 	if (score <= 0) return 'var(--text-hint)';
-	if (score < 1) return '#78909C'; // blue-grey
-	if (score < 2) return '#FFA726'; // orange
-	if (score < 3) return '#FF7043'; // deep orange
-	return '#E53935'; // red – it's on fire
+	if (score < 1.5) return '#78909C';
+	if (score < 3) return '#FFA726';
+	if (score < 4) return '#FF7043';
+	return '#E53935';
 }
 
 export function getHypeLabel(score: number): string {
 	if (score <= 0) return 'Cold';
-	if (score < 1) return 'Warm';
-	if (score < 2) return 'Hot';
-	if (score < 3) return 'Fire';
+	if (score < 1.5) return 'Warm';
+	if (score < 3) return 'Hot';
+	if (score < 4) return 'Fire';
 	return 'Blazing';
 }

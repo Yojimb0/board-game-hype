@@ -49,8 +49,23 @@
 	let saving = $state(false);
 	let labelPopoverOpen = $state(false);
 	let labelInputEl: HTMLInputElement | undefined = $state();
+	let showDatePicker = $state(false);
 
-	// All unique custom labels across the entire collection
+	function todayStr() {
+		return new Date().toISOString().slice(0, 10);
+	}
+
+	function yesterdayStr() {
+		const d = new Date();
+		d.setDate(d.getDate() - 1);
+		return d.toISOString().slice(0, 10);
+	}
+
+	async function addQuickDate(dateStr: string) {
+		if (!authState.user || !bggDetails) return;
+		await addPlayDate(authState.user.uid, bggDetails.id, dateStr);
+	}
+
 	const allLabels = $derived.by(() => {
 		const set = new Set<string>();
 		for (const g of collection.games) {
@@ -61,7 +76,6 @@
 		return [...set].sort();
 	});
 
-	// Labels not yet on this game (suggestions)
 	const suggestedLabels = $derived.by(() => {
 		const current = collectionEntry?.labels ?? [];
 		return allLabels.filter((l) => !current.includes(l));
@@ -94,7 +108,6 @@
 	const hypeColor = $derived(getHypeColor(hypeScore));
 	const hypeLabel = $derived(getHypeLabel(hypeScore));
 
-	// Sync note text when collection entry changes
 	$effect(() => {
 		if (collectionEntry) {
 			noteText = collectionEntry.personalNote || '';
@@ -109,6 +122,7 @@
 
 	function handleClose() {
 		if (noteSaveTimeout) clearTimeout(noteSaveTimeout);
+		showDatePicker = false;
 		dialogEl?.close();
 		onclose?.();
 	}
@@ -165,6 +179,7 @@
 		if (!newPlayDate || !authState.user || !bggDetails) return;
 		await addPlayDate(authState.user.uid, bggDetails.id, newPlayDate);
 		newPlayDate = '';
+		showDatePicker = false;
 	}
 
 	async function handleRemovePlayDate(date: string) {
@@ -182,7 +197,6 @@
 			}
 		}, 800);
 	}
-
 </script>
 
 {#if bggDetails}
@@ -198,11 +212,13 @@
 				{#if bggDetails.image}
 					<div class="hero-image">
 						<img src={bggDetails.image} alt={bggDetails.name} />
+						<div class="hero-bgg-badge">
+							<BggScoreBadge score={bggDetails.bggScore} size="lg" />
+						</div>
 					</div>
 				{/if}
 
 				<div class="stats-row">
-					<BggScoreBadge score={bggDetails.bggScore} size="lg" />
 					<PlayerCount
 						min={bggDetails.minPlayers}
 						max={bggDetails.maxPlayers}
@@ -231,7 +247,7 @@
 							{/each}
 						{/if}
 						{#each bggDetails.categories || [] as cat (cat)}
-							<span class="tag">{cat}</span>
+							<span class="tag cat-tag">{cat}</span>
 						{/each}
 						{#if inCollection}
 							<button class="tag-add-btn" onclick={openLabelPopover} title="Add label">+</button>
@@ -274,6 +290,28 @@
 					{/if}
 				</div>
 
+				{#if inCollection && collectionEntry}
+					<div class="hype-section">
+						<p class="hype-caption">How hyped are you to play this?</p>
+						<div class="hype-controls">
+							<button
+								class="hype-btn down"
+								onclick={() => handleNudge(-1)}
+								title="Cool down"
+							>❄️</button>
+							<div class="hype-display" style:color={hypeColor}>
+								<span class="hype-score-value">🔥 {hypeScore.toFixed(1)}</span>
+								<span class="hype-label-text">{hypeLabel}</span>
+							</div>
+							<button
+								class="hype-btn up"
+								onclick={() => handleNudge(1)}
+								title="Hype up!"
+							>🔥</button>
+						</div>
+					</div>
+				{/if}
+
 				{#if bggDetails.description}
 					<div class="section">
 						<p class="description">{bggDetails.description.slice(0, 500)}{bggDetails.description.length > 500 ? '…' : ''}</p>
@@ -282,76 +320,56 @@
 
 				{#if inCollection && collectionEntry}
 					<div class="collection-section">
-						<h3 class="section-title">My Collection</h3>
-
-						<!-- Hype + Hide Controls -->
-						<div class="hype-row">
-							<div class="hype-controls">
-								<button
-									class="hype-btn down"
-									onclick={() => handleNudge(-1)}
-									title="Cool down"
-								>
-									▼
+						<div class="subsection">
+							<h4>🎲 Play Sessions</h4>
+							<div class="play-date-actions">
+								<button class="play-date-btn" onclick={() => addQuickDate(todayStr())}>
+									📅 Today
 								</button>
-								<div class="hype-display" style:color={hypeColor}>
-									<span class="hype-score">🔥 {hypeScore.toFixed(1)}</span>
-									<span class="hype-label">{hypeLabel}</span>
-								</div>
+								<button class="play-date-btn" onclick={() => addQuickDate(yesterdayStr())}>
+									⏪ Yesterday
+								</button>
 								<button
-									class="hype-btn up"
-									onclick={() => handleNudge(1)}
-									title="Hype up!"
+									class="play-date-btn earlier"
+									class:active={showDatePicker}
+									onclick={() => { showDatePicker = !showDatePicker; }}
 								>
-									▲
+									📆 Earlier…
 								</button>
 							</div>
-							<button class="hide-toggle" onclick={handleToggleHidden} title={collectionEntry.hidden ? 'Unhide' : 'Hide'}>
-								{#if collectionEntry.hidden}
-									👁️
-								{:else}
-									🙈
-								{/if}
-							</button>
-						</div>
-
-						<!-- Play Dates -->
-						<div class="subsection">
-							<h4>Play Dates</h4>
-							<div class="play-dates">
-								{#each [...collectionEntry.playDates].sort().reverse() as date (date)}
-									<span class="date-chip">
-										{new Date(date + 'T00:00:00').toLocaleDateString(undefined, {
-											month: 'short',
-											day: 'numeric',
-											year: 'numeric'
-										})}
-										<button
-											class="chip-remove"
-											onclick={() => handleRemovePlayDate(date)}
-										>
-											✕
-										</button>
-									</span>
-								{/each}
+							{#if showDatePicker}
 								<form
-									class="date-add"
+									class="date-picker-row"
 									onsubmit={(e) => {
 										e.preventDefault();
 										handleAddPlayDate();
 									}}
 								>
 									<input type="date" bind:value={newPlayDate} />
-									<button type="submit" class="add-date-btn" disabled={!newPlayDate}>
-										+
-									</button>
+									<button type="submit" class="date-picker-add" disabled={!newPlayDate}>Add</button>
 								</form>
-							</div>
+							{/if}
+							{#if collectionEntry.playDates.length > 0}
+								<div class="play-dates-list">
+									{#each [...collectionEntry.playDates].sort().reverse() as date (date)}
+										<span class="date-chip">
+											{new Date(date + 'T00:00:00').toLocaleDateString(undefined, {
+												month: 'short',
+												day: 'numeric',
+												year: 'numeric'
+											})}
+											<button
+												class="chip-remove"
+												onclick={() => handleRemovePlayDate(date)}
+											>✕</button>
+										</span>
+									{/each}
+								</div>
+							{/if}
 						</div>
 
-						<!-- Personal Note -->
 						<div class="subsection">
-							<h4>Notes</h4>
+							<h4>📝 Notes</h4>
 							<textarea
 								class="note-input"
 								value={noteText}
@@ -362,17 +380,41 @@
 						</div>
 					</div>
 				{/if}
+
 				<div class="dialog-actions">
 					{#if !authState.user}
+						<a
+							href="https://boardgamegeek.com/boardgame/{bggDetails.id}"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="btn btn-bgg"
+						>View on BoardGameGeek</a>
 						<p class="hint">Sign in to manage your collection</p>
-					{:else if inCollection}
-						<button class="btn btn-danger" onclick={handleRemove} disabled={saving}>
-							Remove from collection
-						</button>
+					{:else if inCollection && collectionEntry}
+						<a
+							href="https://boardgamegeek.com/boardgame/{bggDetails.id}"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="btn btn-bgg"
+						>View on BoardGameGeek</a>
+						<div class="bottom-row">
+							<button class="btn btn-hide" onclick={handleToggleHidden}>
+								{#if collectionEntry.hidden}👁️ Unhide{:else}🙈 Hide{/if}
+							</button>
+							<button class="btn btn-danger" onclick={handleRemove} disabled={saving}>
+								🗑️ Remove
+							</button>
+						</div>
 					{:else}
 						<button class="btn btn-primary" onclick={handleAdd} disabled={saving}>
 							{saving ? 'Adding...' : 'Add to collection'}
 						</button>
+						<a
+							href="https://boardgamegeek.com/boardgame/{bggDetails.id}"
+							target="_blank"
+							rel="noopener noreferrer"
+							class="btn btn-bgg"
+						>View on BoardGameGeek</a>
 					{/if}
 				</div>
 			</div>
@@ -449,6 +491,8 @@
 		overscroll-behavior: contain;
 	}
 
+	/* --- Hero image with overlaid BGG badge --- */
+
 	.hero-image {
 		width: 100%;
 		height: 220px;
@@ -457,6 +501,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		position: relative;
 	}
 
 	.hero-image img {
@@ -464,6 +509,15 @@
 		height: 100%;
 		object-fit: contain;
 	}
+
+	.hero-bgg-badge {
+		position: absolute;
+		top: 10px;
+		right: 10px;
+		filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25));
+	}
+
+	/* --- Stats row --- */
 
 	.stats-row {
 		display: flex;
@@ -486,6 +540,8 @@
 		color: var(--text);
 		white-space: nowrap;
 	}
+
+	/* --- Tags --- */
 
 	.section {
 		padding: 0 16px 12px;
@@ -520,6 +576,11 @@
 		background: #E0F2F1;
 		color: #00695C;
 		font-weight: 600;
+	}
+
+	.tag.cat-tag {
+		background: #FFF3E0;
+		color: #E65100;
 	}
 
 	.tag-remove {
@@ -643,110 +704,96 @@
 		background: #B2DFDB;
 	}
 
-	.description {
-		font-size: 0.82rem;
-		color: var(--text-secondary);
-		line-height: 1.6;
+	/* --- Hype section (above description) --- */
+
+	.hype-section {
+		margin: 0 16px 12px;
+		padding: 14px 16px;
+		border-radius: var(--radius);
+		background: linear-gradient(135deg, #FFF8E1 0%, #FFECB3 50%, #FFE0B2 100%);
+		text-align: center;
 	}
 
-	.collection-section {
-		border-top: 1px solid var(--divider);
-		padding: 12px 16px 16px;
-	}
-
-	.section-title {
-		font-size: 0.85rem;
-		font-weight: 700;
-		margin-bottom: 12px;
-		color: var(--primary);
-	}
-
-	.hype-row {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		margin-bottom: 16px;
+	.hype-caption {
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: #BF360C;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 10px;
 	}
 
 	.hype-controls {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 16px;
-		flex: 1;
-		padding: 10px;
-		background: var(--background);
-		border-radius: var(--radius-sm);
+		gap: 20px;
 	}
 
 	.hype-btn {
-		width: 40px;
-		height: 40px;
+		width: 46px;
+		height: 46px;
 		border-radius: 50%;
-		font-size: 0.9rem;
+		font-size: 1.2rem;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-weight: 700;
 		transition: background 0.15s, transform 0.1s;
+		cursor: pointer;
 	}
 
 	.hype-btn:active {
-		transform: scale(0.9);
+		transform: scale(0.88);
 	}
 
 	.hype-btn.up {
-		background: var(--accent-light);
-		color: #BF360C;
+		background: rgba(255, 87, 34, 0.15);
 	}
 
 	.hype-btn.up:hover {
-		background: var(--accent);
-		color: white;
+		background: rgba(255, 87, 34, 0.3);
 	}
 
 	.hype-btn.down {
-		background: var(--divider);
-		color: var(--text-secondary);
+		background: rgba(3, 169, 244, 0.15);
 	}
 
 	.hype-btn.down:hover {
-		background: #CFD8DC;
+		background: rgba(3, 169, 244, 0.3);
 	}
 
 	.hype-display {
 		text-align: center;
+		min-width: 80px;
 	}
 
-	.hype-score {
+	.hype-score-value {
 		display: block;
-		font-size: 1.3rem;
+		font-size: 1.4rem;
 		font-weight: 800;
 	}
 
-	.hype-label {
+	.hype-label-text {
 		display: block;
 		font-size: 0.7rem;
-		font-weight: 500;
+		font-weight: 600;
 		text-transform: uppercase;
+		letter-spacing: 0.03em;
 	}
 
-	.hide-toggle {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 44px;
-		height: 44px;
-		flex-shrink: 0;
-		font-size: 1.2rem;
+	/* --- Description --- */
+
+	.description {
+		font-size: 0.82rem;
 		color: var(--text-secondary);
-		background: var(--background);
-		border-radius: var(--radius-sm);
-		transition: background 0.15s;
+		line-height: 1.6;
 	}
 
-	.hide-toggle:hover {
-		background: var(--divider);
+	/* --- Collection section --- */
+
+	.collection-section {
+		border-top: 1px solid var(--divider);
+		padding: 14px 16px 8px;
 	}
 
 	.subsection {
@@ -754,61 +801,120 @@
 	}
 
 	.subsection h4 {
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: var(--text-secondary);
-		margin-bottom: 6px;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		font-size: 0.78rem;
+		font-weight: 700;
+		color: var(--text);
+		margin-bottom: 8px;
 	}
 
+	/* --- Play dates --- */
 
-	.play-dates {
+	.play-date-actions {
+		display: flex;
+		gap: 8px;
+	}
+
+	.play-date-btn {
+		flex: 1;
+		padding: 8px 6px;
+		border-radius: var(--radius-sm);
+		font-size: 0.78rem;
+		font-weight: 600;
+		background: var(--background);
+		color: var(--text);
+		border: 1px solid var(--divider);
+		transition: background 0.15s, border-color 0.15s;
+		cursor: pointer;
+		text-align: center;
+	}
+
+	.play-date-btn:hover {
+		background: #E8EAF6;
+		border-color: #C5CAE9;
+	}
+
+	.play-date-btn:active {
+		background: #C5CAE9;
+	}
+
+	.play-date-btn.earlier.active {
+		background: #E8EAF6;
+		border-color: var(--primary);
+		color: var(--primary);
+	}
+
+	.date-picker-row {
+		display: flex;
+		gap: 8px;
+		margin-top: 8px;
+		align-items: center;
+	}
+
+	.date-picker-row input {
+		flex: 1;
+		font-size: 0.82rem;
+		padding: 6px 10px;
+		border: 1px solid var(--divider);
+		border-radius: var(--radius-sm);
+		background: var(--surface);
+	}
+
+	.date-picker-add {
+		font-size: 0.78rem;
+		padding: 6px 14px;
+		border-radius: var(--radius-sm);
+		background: var(--primary);
+		color: white;
+		font-weight: 600;
+		transition: background 0.15s;
+	}
+
+	.date-picker-add:hover:not(:disabled) {
+		background: var(--primary-dark);
+	}
+
+	.date-picker-add:disabled {
+		opacity: 0.35;
+	}
+
+	.play-dates-list {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 6px;
-		align-items: center;
+		margin-top: 10px;
 	}
 
 	.date-chip {
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
-		font-size: 0.75rem;
+		font-size: 0.73rem;
 		padding: 3px 10px;
 		background: var(--background);
 		border-radius: 12px;
 		color: var(--text-secondary);
 	}
 
-	.date-add {
+	.chip-remove {
+		font-size: 0.6rem;
+		color: inherit;
+		opacity: 0.4;
+		padding: 0;
+		width: 14px;
+		height: 14px;
 		display: inline-flex;
 		align-items: center;
-		gap: 4px;
-	}
-
-	.date-add input {
-		font-size: 0.75rem;
-		padding: 3px 8px;
-		border-radius: 8px;
-	}
-
-	.add-date-btn {
-		width: 28px;
-		height: 28px;
-		border-radius: 50%;
-		background: var(--primary);
-		color: white;
-		font-size: 1rem;
-		display: flex;
-		align-items: center;
 		justify-content: center;
-		font-weight: 700;
+		border-radius: 50%;
+		line-height: 1;
 	}
 
-	.add-date-btn:disabled {
-		opacity: 0.3;
+	.chip-remove:hover {
+		opacity: 1;
+		background: rgba(0, 0, 0, 0.1);
 	}
+
+	/* --- Notes --- */
 
 	.note-input {
 		width: 100%;
@@ -823,8 +929,13 @@
 		line-height: 1.5;
 	}
 
+	/* --- Bottom actions --- */
+
 	.dialog-actions {
-		padding: 16px 16px 20px;
+		padding: 12px 16px 20px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
 	}
 
 	.hint {
@@ -840,6 +951,9 @@
 		font-size: 0.9rem;
 		font-weight: 600;
 		transition: background 0.15s;
+		text-align: center;
+		text-decoration: none;
+		display: block;
 	}
 
 	.btn:disabled {
@@ -855,10 +969,43 @@
 		background: var(--primary-dark);
 	}
 
+	.btn-bgg {
+		background: transparent;
+		color: var(--primary);
+		border: 1px solid var(--primary);
+		font-size: 0.82rem;
+		padding: 8px 20px;
+	}
+
+	.btn-bgg:hover {
+		background: rgba(92, 107, 192, 0.08);
+	}
+
+	.bottom-row {
+		display: flex;
+		gap: 8px;
+	}
+
+	.btn-hide {
+		flex: 1;
+		background: var(--background);
+		color: var(--text-secondary);
+		border: 1px solid var(--divider);
+		font-size: 0.82rem;
+		padding: 8px 12px;
+	}
+
+	.btn-hide:hover {
+		background: var(--divider);
+	}
+
 	.btn-danger {
+		flex: 1;
 		background: transparent;
 		color: var(--error);
 		border: 1px solid var(--error);
+		font-size: 0.82rem;
+		padding: 8px 12px;
 	}
 
 	.btn-danger:hover:not(:disabled) {

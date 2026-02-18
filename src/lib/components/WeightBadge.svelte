@@ -26,7 +26,7 @@
 	.weight-pill {
 		display: inline-flex;
 		align-items: center;
-		gap: 3px;
+		gap: 4px;
 		background: rgba(0, 0, 0, 0.06);
 		border-radius: 20px;
 		white-space: nowrap;

@@ -124,6 +124,58 @@ export const bggProxy = onRequest({ cors: true }, async (req, res) => {
 		return;
 	}
 
+	// --- Collection route ---
+	if (path === '/collection' || path.startsWith('/collection')) {
+		const username = req.query.username as string;
+		if (!username) {
+			res.status(400).send('Missing username parameter');
+			return;
+		}
+
+		const token = bggApiToken.value();
+		const collectionUrl = `${BGG_BASE}/collection?username=${encodeURIComponent(username)}&stats=1&subtype=boardgame`;
+
+		const MAX_RETRIES = 5;
+		for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+			try {
+				const headers: Record<string, string> = {
+					'User-Agent': 'BoardGameHype/1.0'
+				};
+				if (token) headers['Authorization'] = `Bearer ${token}`;
+
+				const response = await fetch(collectionUrl, { headers });
+
+				// BGG returns 202 while it prepares the collection — retry after a delay
+				if (response.status === 202) {
+					if (attempt < MAX_RETRIES - 1) {
+						await new Promise((r) => setTimeout(r, 2000));
+						continue;
+					}
+					res.status(202).send('BGG is still preparing the collection. Try again shortly.');
+					return;
+				}
+
+				if (!response.ok) {
+					res.status(response.status).send(`BGG API error: ${response.status}`);
+					return;
+				}
+
+				const xml = await response.text();
+				res.set('Content-Type', 'application/xml');
+				res.set('Cache-Control', 'public, max-age=60');
+				res.send(xml);
+				return;
+			} catch (error) {
+				if (attempt === MAX_RETRIES - 1) {
+					console.error('BGG collection error:', error);
+					res.status(502).send('Failed to fetch collection from BGG');
+					return;
+				}
+			}
+		}
+		return;
+	}
+
 	// --- XML API routes (require token) ---
 	const token = bggApiToken.value();
 	let bggUrl: string;

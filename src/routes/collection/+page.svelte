@@ -100,7 +100,17 @@
 		return [...set].sort();
 	});
 
-	const hasLabels = $derived(bggTypes.length > 0 || customLabels.length > 0);
+	const bggCategories = $derived.by(() => {
+		const set = new Set<string>();
+		for (const g of collection.games) {
+			if (g.categories) {
+				for (const c of g.categories) set.add(c);
+			}
+		}
+		return [...set].sort();
+	});
+
+	const hasLabels = $derived(bggTypes.length > 0 || customLabels.length > 0 || bggCategories.length > 0);
 
 	const sortedGames = $derived.by(() => {
 		let all = settings.showHidden
@@ -117,7 +127,7 @@
 		}
 
 		if (filterType) {
-			all = all.filter((g) => g.bggType?.includes(filterType!) || g.labels?.includes(filterType!));
+			all = all.filter((g) => g.bggType?.includes(filterType!) || g.labels?.includes(filterType!) || g.categories?.includes(filterType!));
 		}
 
 		if (filterWeight !== null) {
@@ -303,15 +313,24 @@
 								{t.replace(' Games', '')}
 							</button>
 						{/each}
-						{#each customLabels as l (l)}
-							<button
-								class="type-pill custom"
-								class:active={filterType === l}
-								onclick={() => pickType(l)}
-							>
-								{l}
-							</button>
-						{/each}
+					{#each customLabels as l (l)}
+						<button
+							class="type-pill custom"
+							class:active={filterType === l}
+							onclick={() => pickType(l)}
+						>
+							{l}
+						</button>
+					{/each}
+					{#each bggCategories as c (c)}
+						<button
+							class="type-pill cat"
+							class:active={filterType === c}
+							onclick={() => pickType(c)}
+						>
+							{c}
+						</button>
+					{/each}
 					</div>
 				</div>
 			{/if}
@@ -382,6 +401,16 @@
 				/>
 			{/each}
 		</div>
+		<div class="donate-row">
+			<p class="donate-label">Enjoying the app? Help cover running costs if you can.</p>
+			<form action="https://www.paypal.com/donate" method="post" target="_top">
+				<input type="hidden" name="business" value="CSF9JJ6J64NG4" />
+				<input type="hidden" name="no_recurring" value="1" />
+				<input type="hidden" name="item_name" value="Help fund potential running costs if the app works and helps you" />
+				<input type="hidden" name="currency_code" value="AUD" />
+				<input type="image" src="https://www.paypalobjects.com/en_AU/i/btn/btn_donate_LG.gif" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Donate with PayPal button" style="padding:0;background:transparent"/>
+			</form>
+		</div>
 	{:else}
 		<div class="game-grid">
 			{#each sortedGames as game (game.bggId)}
@@ -391,6 +420,16 @@
 					onhype={() => handleHype(game.bggId)}
 				/>
 			{/each}
+		</div>
+		<div class="donate-row">
+			<p class="donate-label">Enjoying the app? Help cover running costs if you can.</p>
+			<form action="https://www.paypal.com/donate" method="post" target="_top">
+				<input type="hidden" name="business" value="CSF9JJ6J64NG4" />
+				<input type="hidden" name="no_recurring" value="1" />
+				<input type="hidden" name="item_name" value="Help fund potential running costs if the app works and helps you" />
+				<input type="hidden" name="currency_code" value="AUD" />
+				<input type="image" src="https://www.paypalobjects.com/en_AU/i/btn/btn_donate_LG.gif" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Donate with PayPal button" style="padding:0;background:transparent" />
+			</form>
 		</div>
 	{/if}
 {/if}
@@ -630,6 +669,22 @@
 		border-color: #00695C;
 	}
 
+	.type-pill.cat {
+		background: #FFF3E0;
+		color: #E65100;
+		border-color: #FFE0B2;
+	}
+
+	.type-pill.cat:hover {
+		border-color: #FB8C00;
+	}
+
+	.type-pill.cat.active {
+		background: #E65100;
+		color: white;
+		border-color: #E65100;
+	}
+
 	.weight-row {
 		gap: 10px;
 	}
@@ -817,5 +872,24 @@
 		.view-mode-btn {
 			display: none;
 		}
+	}
+
+	.donate-row {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 10px;
+		padding: 24px 16px 32px;
+	}
+
+	.donate-label {
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+		text-align: center;
+	}
+
+	.donate-row :global(input[type="image"]) {
+		border: none;
+		outline: none;
 	}
 </style>

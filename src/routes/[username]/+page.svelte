@@ -96,7 +96,17 @@
 		return [...set].sort();
 	});
 
-	const hasLabels = $derived(bggTypes.length > 0 || customLabels.length > 0);
+	const bggCategories = $derived.by(() => {
+		const set = new Set<string>();
+		for (const g of games) {
+			if (g.categories) {
+				for (const c of g.categories) set.add(c);
+			}
+		}
+		return [...set].sort();
+	});
+
+	const hasLabels = $derived(bggTypes.length > 0 || customLabels.length > 0 || bggCategories.length > 0);
 
 	const sortedGames = $derived.by(() => {
 		let all = games.filter((g) => !g.hidden);
@@ -111,7 +121,7 @@
 		}
 
 		if (filterType) {
-			all = all.filter((g) => g.bggType?.includes(filterType!) || g.labels?.includes(filterType!));
+			all = all.filter((g) => g.bggType?.includes(filterType!) || g.labels?.includes(filterType!) || g.categories?.includes(filterType!));
 		}
 
 		if (filterWeight !== null) {
@@ -321,18 +331,27 @@
 								{t.replace(' Games', '')}
 							</button>
 						{/each}
-						{#each customLabels as l (l)}
-							<button
-								class="type-pill custom"
-								class:active={filterType === l}
-								onclick={() => pickType(l)}
-							>
-								{l}
-							</button>
-						{/each}
-					</div>
+					{#each customLabels as l (l)}
+						<button
+							class="type-pill custom"
+							class:active={filterType === l}
+							onclick={() => pickType(l)}
+						>
+							{l}
+						</button>
+					{/each}
+					{#each bggCategories as c (c)}
+						<button
+							class="type-pill cat"
+							class:active={filterType === c}
+							onclick={() => pickType(c)}
+						>
+							{c}
+						</button>
+					{/each}
 				</div>
-			{/if}
+			</div>
+		{/if}
 			<div class="sub-bar-row weight-row">
 				<span class="sub-bar-label">🧠 Weight:</span>
 				<div class="weight-track-wrapper">
@@ -630,6 +649,22 @@
 		background: #00695C;
 		color: white;
 		border-color: #00695C;
+	}
+
+	.type-pill.cat {
+		background: #FFF3E0;
+		color: #E65100;
+		border-color: #FFE0B2;
+	}
+
+	.type-pill.cat:hover {
+		border-color: #FB8C00;
+	}
+
+	.type-pill.cat.active {
+		background: #E65100;
+		color: white;
+		border-color: #E65100;
 	}
 
 	.weight-row {

@@ -79,17 +79,25 @@ export async function getBggGameDetails(id: number): Promise<BggGameDetails | nu
 		});
 	}
 
-	const categories = Array.from(
-		item.querySelectorAll('link[type="boardgamecategory"]')
-	)
-		.map((l) => l.getAttribute('value') || '')
-		.filter(Boolean);
+	const allLinks = Array.from(item.getElementsByTagName('link'));
+	const categories: string[] = [];
+	const mechanics: string[] = [];
+	for (const link of allLinks) {
+		const lt = link.getAttribute('type');
+		const val = link.getAttribute('value');
+		if (!val) continue;
+		if (lt === 'boardgamecategory') categories.push(val);
+		else if (lt === 'boardgamemechanic') mechanics.push(val);
+	}
 
-	const mechanics = Array.from(
-		item.querySelectorAll('link[type="boardgamemechanic"]')
-	)
-		.map((l) => l.getAttribute('value') || '')
-		.filter(Boolean);
+	const bggType: string[] = [];
+	const ranks = item.getElementsByTagName('rank');
+	for (const rank of Array.from(ranks)) {
+		if (rank.getAttribute('type') === 'family') {
+			const name = rank.getAttribute('friendlyname') || '';
+			if (name) bggType.push(name.replace(/ Rank$/, ''));
+		}
+	}
 
 	const rawDescription = item.querySelector('description')?.textContent || '';
 
@@ -131,9 +139,95 @@ export async function getBggGameDetails(id: number): Promise<BggGameDetails | nu
 		),
 		bestPlayerCount,
 		recommendedPlayerCount: bestPlayerCount,
+		bggType,
 		categories,
 		mechanics
 	};
+}
+
+export async function fetchBggCollection(username: string): Promise<BggGameDetails[]> {
+	const MAX_CLIENT_RETRIES = 6;
+	let lastStatus = 0;
+
+	for (let attempt = 0; attempt < MAX_CLIENT_RETRIES; attempt++) {
+		const res = await fetch(`/api/bgg/collection?username=${encodeURIComponent(username)}`);
+		lastStatus = res.status;
+
+		if (res.status === 202) {
+			if (attempt < MAX_CLIENT_RETRIES - 1) {
+				await new Promise((r) => setTimeout(r, 3000));
+				continue;
+			}
+			throw new Error('BGG is still preparing the collection. Please try again in a moment.');
+		}
+
+		if (!res.ok) throw new Error(`Failed to fetch collection (${res.status})`);
+
+		const xml = await res.text();
+		if (!xml.includes('<item')) {
+			throw new Error('Unexpected response from BGG');
+		}
+
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(xml, 'text/xml');
+
+		if (doc.querySelector('parsererror')) {
+			throw new Error('Failed to parse BGG collection XML');
+		}
+
+		const items = doc.querySelectorAll('item');
+
+		return Array.from(items)
+			.filter((item) => item.querySelector('status')?.getAttribute('own') === '1')
+			.map((item) => {
+				const id = parseInt(item.getAttribute('objectid') || '0');
+				const name = item.querySelector('name')?.textContent?.trim() || 'Unknown';
+				const thumbnail = item.querySelector('thumbnail')?.textContent?.trim() || '';
+				const image = item.querySelector('image')?.textContent?.trim() || '';
+				const yearPublished = parseInt(item.querySelector('yearpublished')?.textContent || '0');
+				const stats = item.querySelector('stats');
+				const minPlayers = parseInt(stats?.getAttribute('minplayers') || '0');
+				const maxPlayers = parseInt(stats?.getAttribute('maxplayers') || '0');
+				const playingTime = parseInt(stats?.getAttribute('playingtime') || '0');
+				const avg = stats?.querySelector('rating average');
+				const bggScore = parseFloat(avg?.getAttribute('value') || '0');
+				const avgWeight = stats?.querySelector('rating averageweight');
+				const weight = parseFloat(avgWeight?.getAttribute('value') || '0');
+
+			const bggType: string[] = [];
+			for (const rank of Array.from(item.getElementsByTagName('rank'))) {
+				if (rank.getAttribute('type') === 'family') {
+					const fname = rank.getAttribute('friendlyname') || '';
+					if (fname) bggType.push(fname.replace(/ Rank$/, ''));
+				}
+			}
+
+			return {
+				id,
+				name,
+				thumbnail,
+				image,
+				description: '',
+				yearPublished,
+				minPlayers,
+				maxPlayers,
+				playingTime,
+				minPlayTime: playingTime,
+				maxPlayTime: playingTime,
+				bggScore,
+				averageRating: 0,
+				weight,
+				bestPlayerCount: [],
+				recommendedPlayerCount: [],
+				bggType,
+				categories: [],
+				mechanics: []
+			};
+			})
+			.filter((g) => g.id > 0);
+	}
+
+	throw new Error(`Failed to fetch collection after ${MAX_CLIENT_RETRIES} attempts (last status: ${lastStatus})`);
 }
 
 export async function getBggGameFromUrl(url: string): Promise<BggGameDetails | null> {

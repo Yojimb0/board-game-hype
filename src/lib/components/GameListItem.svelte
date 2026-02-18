@@ -20,8 +20,6 @@
 
 	let { game, readonly: isReadonly = false, onclick, onhype }: Props = $props();
 
-	const visibleLabels = $derived(game.labels?.slice(0, 2) ?? []);
-
 	const hypeScore = $derived(calculateHypeScore(game.hypeEvents));
 	const hypeColor = $derived(getHypeColor(hypeScore));
 	const isHidden = $derived(!!game.hidden);
@@ -50,13 +48,6 @@
 				/>
 				<WeightBadge weight={game.weight} size="sm" />
 			</div>
-			{#if visibleLabels.length > 0}
-				<div class="labels">
-					{#each visibleLabels as label (label)}
-						<span class="label-chip">{label}</span>
-					{/each}
-				</div>
-			{/if}
 		</div>
 		<div class="scores">
 			<BggScoreBadge score={game.bggScore} size="sm" />
@@ -135,22 +126,6 @@
 		align-items: center;
 		gap: 5px;
 		flex-wrap: wrap;
-	}
-
-	.labels {
-		display: flex;
-		gap: 4px;
-		margin-top: 4px;
-		flex-wrap: wrap;
-	}
-
-	.label-chip {
-		font-size: 0.65rem;
-		padding: 1px 6px;
-		background: #E0F2F1;
-		color: #00695C;
-		border-radius: 10px;
-		font-weight: 500;
 	}
 
 	.scores {
